@@ -1,0 +1,15 @@
+Package: cimpl
+Type: Package
+Title: Common Insertion site Mapping PLatform
+Version: 0.99.22
+Date: 2010-03-23
+Author: Jelle ten Hoeve and Jeroen de Ridder
+Maintainer: Jelle ten Hoeve <j.t.hoeve@nki.nl>
+Description: Analysis package for multi-sample retroviral and transposon insertional mutagenesis data using Gaussian kernel convolution to identify common insertion sites.
+License: GPL-3
+Depends: methods, Biostrings, KernSmooth, MASS, biomaRt, xtable
+Suggests: BSgenome.Mmusculus.UCSC.mm9
+Enhances:
+Collate: 'AllClasses.R' 'cimpl.R' 'plot-methods.R' 'export-methods.R' 'show-methods.R'
+LazyLoad: yes
+biocViews: Genetics, Visualization

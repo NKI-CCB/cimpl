@@ -1,0 +1,8 @@
+import(Biostrings)
+import(biomaRt)
+import(xtable)
+importFrom(graphics, plot)
+importFrom(KernSmooth, bkde2D)
+importFrom(MASS, kde2d)
+
+exportPattern("^[[:alpha:]]+")
