@@ -17,4 +17,4 @@ The package contains a vignette and manual pages with detailed usage information
 
 # Reference
 
-De Ridder et al. Detecting statistically significant common insertion sites in retroviral insertional mutagenesis screens. PLoS Comput Biol, 2:e166, 2006.
+De Ridder et al. Detecting statistically significant common insertion sites in retroviral insertional mutagenesis screens. PLoS Comput Biol, 2:e166, 2006. [doi:10.1371/journal.pcbi.0020166](http://dx.doi.org/10.1371/journal.pcbi.0020166)
