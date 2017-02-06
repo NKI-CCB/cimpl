@@ -22,6 +22,7 @@ doCimplAnalysis(data, scales = (1:15) * 10000, n_iterations = 100, sample_period
   \item{specificity.pattern}{The specificity pattern at which the insertion locations are restricted. If no system is set, the specificity pattern can be user-defined.}
   \item{lhc.method}{The local hopping correction method. Possible values are 'none' or 'exclude'. When the distance between two neighboring insertions is less than three kernel widths, the insertion with the smallest 'contig_depth' is the hopped insertion. If \code{lhc.method == 'exclude'}, hopped insertions are excluded from the analysis.}
   \item{verbose}{Echo progress indicators?}
+  \item{threads}{Number of cores to use when calculating the null model.}
 }
 \details{
 

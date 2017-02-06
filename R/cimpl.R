@@ -10,7 +10,7 @@ doCimplAnalysis <- function(
 	specificity.pattern,
 	lhc.method = c('none', 'exclude'),  # local hopping correction method
 	verbose=TRUE,
-	threads=1
+	cores=1
 	) {
 
 	if (any(!chromosomes %in% data$chr)) {
@@ -85,7 +85,7 @@ doCimplAnalysis <- function(
 				#null_peaks <- .getPeakDistribution(null_densities)
 
 				if (verbose) cat('null-peaks...')
-				null_peaks <- .generatePeakDistribution(chr_length, h, n_insertions, n_iterations, n_sample_points, verbose=verbose, threads=threads)
+				null_peaks <- .generatePeakDistribution(chr_length, h, n_insertions, n_iterations, n_sample_points, verbose=verbose, cores=cores)
 
 				if (verbose) cat('cimpl_object...')
 				cimplObject <- .getCimplObject(chr_data, chr, null_peaks, h=h, n_sample_points=n_sample_points, verbose=verbose)
@@ -102,7 +102,7 @@ doCimplAnalysis <- function(
 				#null_peaks <- .getPeakDistribution(null_densities)
 
 				if (verbose) cat('null-peaks...')
-				null_peaks <- .generatePeakDistributionFromBackground(background, h, n_insertions, n_iterations, n_sample_points, verbose=verbose, threads=threads)
+				null_peaks <- .generatePeakDistributionFromBackground(background, h, n_insertions, n_iterations, n_sample_points, verbose=verbose, cores=cores)
 
 				if (verbose) cat('at-density...')
 				bg_density <- density(background, bw=h, n=n_sample_points)
@@ -131,7 +131,7 @@ doCimplAnalysis <- function(
 	)
 }
 
-.generatePeakDistribution <- function(chr_length, h, n_insertions, n_iterations, n_sample_points, verbose=TRUE, threads=1) {
+.generatePeakDistribution <- function(chr_length, h, n_insertions, n_iterations, n_sample_points, verbose=TRUE, cores=1) {
 
 	apply_func <- function(i) {
 		r_insertions <- sort(floor(runif(n_insertions, min=1, max=chr_length)))
@@ -140,9 +140,9 @@ doCimplAnalysis <- function(
 		list(max_pos=d$x[lms$max_pos], max_val=lms$max_val)
 	}
 
-	if (threads > 1) {
+	if (cores > 1) {
 		suppressMessages(library(parallel))
-		local_maxima_list <- mclapply(1:n_iterations, apply_func, mc.cores=threads)
+		local_maxima_list <- mclapply(1:n_iterations, apply_func, mc.cores=cores)
 	} else {
 		local_maxima_list <- lapply(1:n_iterations, apply_func)
 	}
@@ -159,7 +159,7 @@ doCimplAnalysis <- function(
 }
 
 
-.generatePeakDistributionFromBackground <- function(background, h, n_insertions, n_iterations, n_sample_points, verbose=TRUE, threads=1) {
+.generatePeakDistributionFromBackground <- function(background, h, n_insertions, n_iterations, n_sample_points, verbose=TRUE, cores=1) {
 
 	apply_func <- function(i) {
 		r_insertions <- sort(sample(background, n_insertions, replace=TRUE))
@@ -168,9 +168,9 @@ doCimplAnalysis <- function(
 		list(max_pos=d$x[lms$max_pos], max_val=lms$max_val)
 	}
 
-	if (threads > 1) {
+	if (cores > 1) {
 		suppressMessages(library(parallel))
-		local_maxima_list <- mclapply(1:n_iterations, apply_func, mc.cores=threads)
+		local_maxima_list <- mclapply(1:n_iterations, apply_func, mc.cores=cores)
 	} else {
 		local_maxima_list <- lapply(1:n_iterations, apply_func)
 	}
