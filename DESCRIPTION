@@ -1,8 +1,8 @@
 Package: cimpl
 Type: Package
 Title: Common Insertion site Mapping PLatform
-Version: 1.0
-Date: 2010-03-23
+Version: 1.1
+Date: 2017-03-21
 Author: Jelle ten Hoeve and Jeroen de Ridder
 Maintainer: Jelle ten Hoeve <j.t.hoeve@nki.nl>
 Description: Analysis package for multi-sample retroviral and transposon insertional mutagenesis data using Gaussian kernel convolution to identify common insertion sites.

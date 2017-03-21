@@ -1,8 +1,8 @@
 package:
   name: r-cimpl
-  version: 1.0
+  version: 1.1
 source:
-  git_url: https://github.com/NKI-CCB/cimpl.git
+  path: ../
 build:
   number: 0
   rpaths:
