@@ -1,3 +1,7 @@
+
+setGeneric(name='plot', 
+           def=function(x, y, ...) { standardGeneric('plot') })
+
 setMethod("plot", signature(x="cimplAnalysis", y="missing"), function(x, y, type=c('kse', 'null.cdf', 'scale.space'), chr=x@chromosomes[1], scale=x@scales[1], alpha=0.05, mul.test=TRUE, bpLim, plot.tumor.densities=FALSE, interactive=TRUE, ...) {
 	chr.idx <- which(x@chromosomes == chr)
 	kw.idx <- which(x@scales == scale)

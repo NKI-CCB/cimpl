@@ -4,7 +4,7 @@
 Do "cimpl" analysis
 }
 \description{
-Calculate a \linkS4class{cimplAnalysis} object using insertion data. 
+Calculate a \linkS4class{cimplAnalysis} object using insertion data.
 }
 \usage{
 doCimplAnalysis(data, scales = (1:15) * 10000, n_iterations = 100, sample_period = 0.1, max_sample_points = 2^19, chromosomes = unique(data$chr), BSgenome, system = c("MMTV", "MuLV", "SB", "PB"), specificity.pattern, lhc.method = c("none", "exclude"), verbose = TRUE)
@@ -22,6 +22,7 @@ doCimplAnalysis(data, scales = (1:15) * 10000, n_iterations = 100, sample_period
   \item{specificity.pattern}{The specificity pattern at which the insertion locations are restricted. If no system is set, the specificity pattern can be user-defined.}
   \item{lhc.method}{The local hopping correction method. Possible values are 'none' or 'exclude'. When the distance between two neighboring insertions is less than three kernel widths, the insertion with the smallest 'contig_depth' is the hopped insertion. If \code{lhc.method == 'exclude'}, hopped insertions are excluded from the analysis.}
   \item{verbose}{Echo progress indicators?}
+  \item{cores}{Number of cores to use when calculating the null model.}
 }
 \details{
 
@@ -31,7 +32,7 @@ Then, for each chromosome and each scale:
 
 1. The data is randomized, i.e each insertion (if \code{lhc.method=='exclude'} hops are excluded) is given a random location on the chromosome. If \code{specificity.pattern != ''} possible locations are restricted accordingly.
 
-2. Gaussian kernel density estimation is applied on the randomized data and the peaks are located. For each peak, the density (or peak height) and the background density at the peak location are added to the (joint) null-distribution. 
+2. Gaussian kernel density estimation is applied on the randomized data and the peaks are located. For each peak, the density (or peak height) and the background density at the peak location are added to the (joint) null-distribution.
 
 3. Steps 1 and 2 are repeated \code{n_iteration} times.
 

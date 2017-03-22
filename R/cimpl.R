@@ -9,8 +9,15 @@ doCimplAnalysis <- function(
 	system = c('MMTV', 'MuLV', 'SB', 'PB'),
 	specificity.pattern,
 	lhc.method = c('none', 'exclude'),  # local hopping correction method
-	verbose=TRUE
+	verbose=TRUE,
+	cores=1
 	) {
+
+	if (any(!chromosomes %in% data$chr)) {
+		warning(sprintf('Dropped chromosomes not present in data: %s',
+						 paste(chromosomes[!chromosomes %in% data$chr], collapse=', ')))
+		chromosomes = chromosomes[chromosomes %in% data$chr]
+	}
 
 	# processing arguments
 	if (!missing(system)) {
@@ -29,8 +36,8 @@ doCimplAnalysis <- function(
 	}
 
 	lhc.method <- match.arg(lhc.method)
-	
-	print(match.call(expand.dots=TRUE))
+
+	#print(match.call(expand.dots=TRUE))
 	# starting the analysis
 	if (verbose) cat('Starting CIMPL analysis...\n')
 
@@ -38,8 +45,13 @@ doCimplAnalysis <- function(
 		if (verbose) cat(paste('>>>> chromosome', chr, '<<<<\n'))
 
 		if ( specificity.pattern != '' ) {
+
 			strReverse <- function(x) sapply(lapply(strsplit(x, NULL), rev), paste, collapse="")
-			background <- c(matchPattern(specificity.pattern, BSgenome[[chr]])@start, matchPattern(strReverse(specificity.pattern), BSgenome[[chr]])@start)
+
+			background <- c(matchPattern(specificity.pattern, BSgenome[[chr]])@ranges@start, matchPattern(strReverse(specificity.pattern), BSgenome[[chr]])@ranges@start)
+                        # for R 2.11.1
+                        #background <- c(matchPattern(specificity.pattern, BSgenome[[chr]])@start, matchPattern(strReverse(specificity.pattern), BSgenome[[chr]])@start)
+
 		} else {
 			background <- NULL
 		}
@@ -53,7 +65,7 @@ doCimplAnalysis <- function(
 #				if (verbose) cat(paste('Warning: undersampling for h =', h , '!! Sample rate set to', max_sample_points, '. '))
 				n_sample_points <- max_sample_points
 			}
-			
+
 			chr_data <- data[data$chr == chr, ]
 			if (lhc.method != 'none') {
 				chr_data$hop <- .isHop(chr_data, h * 3)
@@ -71,10 +83,10 @@ doCimplAnalysis <- function(
 
 				#if (verbose) cat('null-peaks...')
 				#null_peaks <- .getPeakDistribution(null_densities)
-								
+
 				if (verbose) cat('null-peaks...')
-				null_peaks <- .generatePeakDistribution(chr_length, h, n_insertions, n_iterations, n_sample_points, verbose=verbose)
-				
+				null_peaks <- .generatePeakDistribution(chr_length, h, n_insertions, n_iterations, n_sample_points, verbose=verbose, cores=cores)
+
 				if (verbose) cat('cimpl_object...')
 				cimplObject <- .getCimplObject(chr_data, chr, null_peaks, h=h, n_sample_points=n_sample_points, verbose=verbose)
 
@@ -90,8 +102,8 @@ doCimplAnalysis <- function(
 				#null_peaks <- .getPeakDistribution(null_densities)
 
 				if (verbose) cat('null-peaks...')
-				null_peaks <- .generatePeakDistributionFromBackground(background, h, n_insertions, n_iterations, n_sample_points, verbose=verbose)
-				
+				null_peaks <- .generatePeakDistributionFromBackground(background, h, n_insertions, n_iterations, n_sample_points, verbose=verbose, cores=cores)
+
 				if (verbose) cat('at-density...')
 				bg_density <- density(background, bw=h, n=n_sample_points)
 
@@ -103,7 +115,7 @@ doCimplAnalysis <- function(
 			}
 		})
 	})
-	
+
 	new('cimplAnalysis',
 		cimplObjects = cimplObjects,
 		chromosomes = chromosomes,
@@ -119,54 +131,58 @@ doCimplAnalysis <- function(
 	)
 }
 
-.generatePeakDistribution <- function(chr_length, h, n_insertions, n_iterations, n_sample_points, verbose=TRUE) {
-	local_maxima_list <- lapply(1:n_iterations, function(i) {
-		if (verbose) cat('.')
+.generatePeakDistribution <- function(chr_length, h, n_insertions, n_iterations, n_sample_points, verbose=TRUE, cores=1) {
 
+	apply_func <- function(i) {
 		r_insertions <- sort(floor(runif(n_insertions, min=1, max=chr_length)))
-				
-		# calculate density
-		d <- density(r_insertions, bw=h, n=n_sample_points)
-		
-		# get peaks
-		lms <- .getLocalMaxima(d$y)
+		d <- density(r_insertions, bw=h, n=n_sample_points)  # calculate density
+		lms <- .getLocalMaxima(d$y)                          # get peaks
 		list(max_pos=d$x[lms$max_pos], max_val=lms$max_val)
-	})
-	
+	}
+
+	if (cores > 1) {
+		suppressMessages(library(parallel))
+		local_maxima_list <- mclapply(1:n_iterations, apply_func, mc.cores=cores)
+	} else {
+		local_maxima_list <- lapply(1:n_iterations, apply_func)
+	}
+
 	x <- do.call('c', lapply(local_maxima_list, function(lm) lm$max_pos))
 	y <- do.call('c', lapply(local_maxima_list, function(lm) lm$max_val))
-	
+
 	# sort ascending
 	srt <- sort.int(x, index.return=TRUE)
 	x <- x[srt$ix]
 	y <- y[srt$ix]
-	
+
 	return( list( x=x, y=y ) )
 }
 
 
-.generatePeakDistributionFromBackground <- function(background, h, n_insertions, n_iterations, n_sample_points, verbose=TRUE) {
-	local_maxima_list <- lapply(1:n_iterations, function(i) {
-		if (verbose) cat('.')
-		# draw from TA/AT sites background
+.generatePeakDistributionFromBackground <- function(background, h, n_insertions, n_iterations, n_sample_points, verbose=TRUE, cores=1) {
+
+	apply_func <- function(i) {
 		r_insertions <- sort(sample(background, n_insertions, replace=TRUE))
-		
-		# calculate density
-		d <- density(r_insertions, bw=h, n=n_sample_points)
-		
-		# get peaks
-		lms <- .getLocalMaxima(d$y)
+		d <- density(r_insertions, bw=h, n=n_sample_points)  # calculate density
+		lms <- .getLocalMaxima(d$y)                          # get peaks
 		list(max_pos=d$x[lms$max_pos], max_val=lms$max_val)
-	})
+	}
+
+	if (cores > 1) {
+		suppressMessages(library(parallel))
+		local_maxima_list <- mclapply(1:n_iterations, apply_func, mc.cores=cores)
+	} else {
+		local_maxima_list <- lapply(1:n_iterations, apply_func)
+	}
 
 	x <- do.call('c', lapply(local_maxima_list, function(lm) lm$max_pos))
 	y <- do.call('c', lapply(local_maxima_list, function(lm) lm$max_val))
-	
+
 	# sort ascending
 	srt <- sort.int(x, index.return=TRUE)
 	x <- x[srt$ix]
 	y <- y[srt$ix]
-	
+
 	return( list( x=x, y=y ) )
 }
 
@@ -193,16 +209,20 @@ doCimplAnalysis <- function(
 }
 
 .getHopIndices <- function(location, contig_depth, max.hopping.distance) {
+    if (is.null(contig_depth)) {
+        stop('Missing contig_depth column for hop exclusion')
+    }
+
 	# compute distance matrix between locations
 	dist_m <- as.matrix(dist(location))
-	
+
 	# which insertions (pairs) are within hopping range
 	pairs <- which(dist_m <= max.hopping.distance, arr.ind=TRUE)
-	
+
 	# remove diagonal and duplicates
 	pairs <- pairs[pairs[, 1] < pairs[, 2], , drop=FALSE]
 	#distances <- dist_m[pairs]
-	
+
 	# for each pair, the insertion with the smallest contig depth is the hopped insertion
 	idx1 <- contig_depth[pairs[, 1]] < contig_depth[pairs[, 2]]
 	unique ( c ( pairs[idx1, 1], pairs[!idx1, 2] ) )
@@ -222,14 +242,14 @@ doCimplAnalysis <- function(
 .getHopWeights <- function(location, contig_depth, max.hopping.distance) {
 	# compute distance matrix between locations
 	dist_m <- as.matrix(dist(location))
-	
+
 	# which insertions (pairs) are within hopping range
 	pairs <- which(dist_m <= max.hopping.distance, arr.ind=TRUE)
-	
+
 	# remove diagonal and duplicates (upper part)
 	pairs <- pairs[pairs[, 1] < pairs[, 2], , drop=FALSE]
 	#distances <- dist_m[pairs]
-		
+
 	weights <- rep(1, length(location))
 	for (i in 1:dim(pairs)[1]) {
 		i1 <- pairs[i, 1]
@@ -253,8 +273,8 @@ doCimplAnalysis <- function(
 		if (verbose) cat('.')
 		# draw from uniform background
 		r_insertions <- sort(floor(runif(n_insertions, min=1, max=chr_length)))
-		
-		# calculate density 
+
+		# calculate density
 		density(r_insertions, bw=h, n=n_sample_points)
 	})
 
@@ -268,11 +288,11 @@ doCimplAnalysis <- function(
 		if (verbose) cat('.')
 		# draw from TA/AT sites background
 		r_insertions <- sort(sample(background, n_insertions, replace=TRUE))
-		
+
 		# calculate density
 		density(r_insertions, bw=h, n=n_sample_points)
 	})
-	
+
 	return( null_densities )
 }
 
@@ -289,7 +309,7 @@ doCimplAnalysis <- function(
 	srt <- sort.int(x, index.return=TRUE)
 	x <- x[srt$ix]
 	y <- y[srt$ix]
-	
+
 	return( list( x=x, y=y ) )
 }
 
@@ -311,7 +331,7 @@ doCimplAnalysis <- function(
 		insertions <- chr_data$location[!chr_data$hop]
 	}
 	d <- density(insertions, bw=h, n=n_sample_points)
-	
+
 	# locate peaks
 	lms <- .getLocalMaxima(d$y)
 	peaks <- list( x=d$x[lms$max_pos], y=lms$max_val )
@@ -337,11 +357,11 @@ doCimplAnalysis <- function(
 			est <- kde2d(null_peaks$priors, null_peaks$y, n=100)        # calculate prior-ph density
 		}
 		est$z <- t(apply( est$z, 1, function(x) cumsum(x)/sum(x) )) # make it a CDF-surface
-		
+
 		# calculate p-vals
 		peaks$p_vals <- 1 - .biapprox( est, cbind(peaks$priors, peaks$y) )    # do a bi-linear approximation for the observed ph's - priors.
 		peaks$p_vals[is.na(peaks$p_vals)] <- as.numeric( peaks$y[is.na(peaks$p_vals)] < max(est$y) )  # fix peaks that fall outside the density boundaries
-		
+
 		# somehow, numerical aberrations occur resulting in negative p-vals
 		peaks$p_vals[peaks$p_vals < 0] <- 0
 	} else {
@@ -350,7 +370,7 @@ doCimplAnalysis <- function(
 			sum(null_peaks$y >= height) / length(null_peaks$y)
 		})
 	}
-	
+
 	n_peaks <- length(peaks$x)
 
 	if (!missing(bg_density)) {
@@ -403,7 +423,7 @@ doCimplAnalysis <- function(
 
 .biapprox <- function (obj, loc) {
 	# obj is a surface object like the list for contour or image.
-	# loc is a matrix of (x, y) locations 
+	# loc is a matrix of (x, y) locations
 	x <- obj$x
 	y <- obj$y
 	x.new <- loc[,1]
@@ -445,10 +465,10 @@ doCimplAnalysis <- function(
 }
 
 .getTumorDensities <- function(cimplObject, cumulative=FALSE) {
-	
+
 	ids <- unique(cimplObject@data[[.getSampleIDColName(cimplObject@data)]])
 	tds <- matrix(0, length(cimplObject@kse$x), length(ids))
-	
+
 	for(i in 1:length(ids)) {
 		if (is.null(cimplObject@data$hop)) {
 			insertions <- cimplObject@data$location[cimplObject@data[[.getSampleIDColName(cimplObject@data)]] == ids[i]]
@@ -461,22 +481,22 @@ doCimplAnalysis <- function(
 		}
 	}
 	colnames(tds) <- ids
-	
+
 	if (cumulative) {
 		tds[is.na(tds)] <- 0
 		for(i in 1:dim(tds)[1]) {
 			tds[i,] <- cumsum(tds[i,])
 		}
 	}
-	
+
 	tds
 }
 
 getEnsemblGenes <- function(cimplAnalysis, geneIdentifiers=c('ensembl_gene_id', 'external_gene_id'), mart=useMart("ensembl", dataset = "mmusculus_gene_ensembl")) {
 	genes <- getBM(attributes=c('ensembl_gene_id', 'chromosome_name', 'start_position', 'end_position'), filters='chromosome_name', values=substring(cimplAnalysis@chromosomes, 4), mart=mart)
-	
+
 	# , 'unigene'
-	# filter out unknown 
+	# filter out unknown
 	if (!all(i <- geneIdentifiers %in% listAttributes(mart)[,1])) {
 		stop(paste(geneIdentifiers[!i], ' is/are no valid biomaRt attributes for this mart.'))
 	}
@@ -484,7 +504,7 @@ getEnsemblGenes <- function(cimplAnalysis, geneIdentifiers=c('ensembl_gene_id', 
 	if (length(geneIdentifiers) > 0) {
 		if ( !(length(geneIdentifiers) == 1 & geneIdentifiers[1] == 'ensembl_gene_id' )) {
 			annot <- getBM(attributes=unique(c('ensembl_gene_id', geneIdentifiers)), filters='ensembl_gene_id', values=genes$ensembl_gene_id, mart=mart)
-			
+
 			extra_annot <- sapply(genes$ensembl_gene_id, function(ens) {
 				idx <- annot$ensembl_gene_id == ens
 				sapply(2:ncol(annot), function(col) {
@@ -496,7 +516,7 @@ getEnsemblGenes <- function(cimplAnalysis, geneIdentifiers=c('ensembl_gene_id', 
 
 			if (!is.null(dim(extra_annot)))
 				extra_annot <- t(extra_annot)
-			
+
 			extra_annot <- data.frame(extra_annot, stringsAsFactors=FALSE)
 			colnames(extra_annot) <- colnames(annot)[-1]
 			genes <- cbind(genes, extra_annot)
@@ -505,20 +525,20 @@ getEnsemblGenes <- function(cimplAnalysis, geneIdentifiers=c('ensembl_gene_id', 
 	if (! 'ensembl_gene_id' %in% geneIdentifiers) {
 		genes$ensembl_gene_id <- NULL
 	}
-	
+
 	attr(genes, 'geneIdentifiers') <- geneIdentifiers
-	
+
 	genes
 }
 
 # @deprecated: use getCISs
 .getPeaks <- function(cimplAnalysis, alpha=0.05, mul.test=TRUE, mart=useMart("ensembl", dataset = "mmusculus_gene_ensembl"), genes = getEnsemblGenes(cimplAnalysis, mart), order.by='p_value') {
-		
+
 	df <- do.call('rbind', lapply(cimplAnalysis@chromosomes, function(chr) {
 		chr.idx <- which(cimplAnalysis@chromosomes == chr)
-		
+
 		chr_genes <- genes[genes$chromosome_name == substring(chr, 4), ,drop=FALSE]
-		
+
 		do.call('rbind', lapply(cimplAnalysis@scales, function(kw) {
 
 			kw.idx <- which(cimplAnalysis@scales == kw)
@@ -538,12 +558,12 @@ getEnsemblGenes <- function(cimplAnalysis, geneIdentifiers=c('ensembl_gene_id', 
 				} else if ( sum(idx) == 1 ) {
 					as.character(chr_genes[which(idx) ,c(1, 2)])
 				} else {
-					# this peak has hit multiple genes! 
-					c(paste(chr_genes[which(idx) , 1], collapse='|'), 
+					# this peak has hit multiple genes!
+					c(paste(chr_genes[which(idx) , 1], collapse='|'),
 					  paste(chr_genes[which(idx) , 2], collapse='|')  )
 				}
 			})
-	
+
 			data.frame(
 				location         = round(cimpl@peaks$x),
 				chromosome       = rep(chr, cimpl@n_peaks),
@@ -561,7 +581,7 @@ getEnsemblGenes <- function(cimplAnalysis, geneIdentifiers=c('ensembl_gene_id', 
 }
 
 .CISThresholdLine <- function(cimplObject, alpha) {
-	
+
 	if ( length(cimplObject@null_cdf) == 0 ) {
 		list(x=cimplObject@kse$x, y=rep( quantile(cimplObject@null_peaks$y, prob=1-alpha) , length(cimplObject@kse$x)))
 	} else {
@@ -597,9 +617,11 @@ getEnsemblGenes <- function(cimplAnalysis, geneIdentifiers=c('ensembl_gene_id', 
 	list(start_pos=start_pos, end_pos=end_pos)
 }
 
+## Genes can be supplied from Ensembl as:
+## 	 mart=useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+##   genes = getEnsemblGenes(cimplAnalysis, mart)
+getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromosomes, scales=cimplAnalysis@scales, mul.test=TRUE, genes=NULL, order.by=c('p_value', 'n_insertions'), decreasing=c(FALSE, TRUE)) {
 
-getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromosomes, scales=cimplAnalysis@scales, mul.test=TRUE, mart=useMart("ensembl", dataset = "mmusculus_gene_ensembl"), genes = getEnsemblGenes(cimplAnalysis, mart), order.by=c('p_value', 'n_insertions'), decreasing=c(FALSE, TRUE)) {	
-	
 	df <- do.call('rbind', lapply(chromosomes, function(chr) {
 		chr.idx <- which(cimplAnalysis@chromosomes == chr)
 		do.call('rbind', lapply(scales, function(kw) {
@@ -610,14 +632,14 @@ getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromos
 			} else {
 				n_tests <- 1
 			}
-			
+
 			cimplObject <- cimplAnalysis@cimplObjects[[chr.idx]][[kw.idx]]
-			
+
 			regions <- .getRegionsAboveThreshold(cimplObject, alpha / n_tests)
 			n_regions <- length(regions$start_pos)
 
 			if (n_regions == 0) {
-				return(NULL)	
+				return(NULL)
 			} else if (n_regions == 1) {
 				annDf <- .annotateRegion(chr, kw, regions$start_pos, regions$end_pos, cimplObject, genes)
 			} else {
@@ -625,19 +647,19 @@ getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromos
 					.annotateRegion(chr, kw, regions$start_pos[i], regions$end_pos[i], cimplObject, genes)
 				}))
 			}
-						
+
 			return(annDf)
 		}))
 	}))
 
-	if (is.null(df)) { 
+	if (is.null(df)) {
 		# no CISs found!
 		NULL
 	} else if(dim(df)[1] == 0) {
 		# no CISs found!
 		NULL
 	} else {
-		
+
 		# make some nicely formatted CIS ids and set them as rownames
 		rownames(df) <- .makeCISID(df$chromosome, df$peak_location, df$scale)
 
@@ -652,14 +674,16 @@ getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromos
 .makeCISID <- function(chr, loc, scale) {
 	paste('CIS', substring(chr, 4), ':', loc, '_', .formatScales(scale), sep='')
 }
-	
-.annotateRegion <- function(chr, scale, bpStart, bpEnd, cimplObject, genes) {
-	
-	chr_genes <- genes[genes$chromosome_name == substring(chr, 4), ,drop=FALSE]
-	
+
+.annotateRegion <- function(chr, scale, bpStart, bpEnd, cimplObject, genes=NULL) {
+	if (!is.null(genes))
+		chr_genes <- genes[genes$chromosome_name == substring(chr, 4), ,drop=FALSE]
+	else
+		chr_genes <- NULL
+
 	peak.idx <- which(round(cimplObject@peaks$x) >= bpStart & round(cimplObject@peaks$x) <= bpEnd)
 	n_peaks <- length(peak.idx)
-	
+
 	if (n_peaks == 0) {
 		# CIS contains no peaks
 		return(NULL)
@@ -674,9 +698,9 @@ getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromos
 	}
 }
 
-.annotatePeak <- function(chr, scale, cisStart, cisEnd, peak.idx, cimplObject, chr_genes) {
+.annotatePeak <- function(chr, scale, cisStart, cisEnd, peak.idx, cimplObject, chr_genes=NULL) {
 	peakLoc <- round(cimplObject@peaks$x[peak.idx])
-	
+
 
 	ann <- data.frame(row.names='')
 
@@ -686,26 +710,28 @@ getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromos
 	ann$start <- cisStart
 	ann$end <- cisEnd
 	ann$width <- cisEnd - cisStart + 1
-	
+
 	snappedLocs <- .snapToPeaks(cimplObject@data$location, round(cimplObject@peaks$x))
 	ann$n_insertions <- sum(snappedLocs >= cisStart & snappedLocs <= cisEnd)
 
 	ann$p_value <- cimplObject@peaks$p_vals[peak.idx]
 	ann$scale <- scale
 
-	ags <- .associateGenes(chr, cisStart, cisEnd, peakLoc, chr_genes)
-	for(id in attr(chr_genes, 'geneIdentifiers')) {
-		
-		a <- chr_genes[ags$associated, id]
-		a <- a[a!='']
-		
-		o <- chr_genes[ags$other, id]
-		o <- o[o!='']
+	if (!is.null(chr_genes)) {
+		ags <- .associateGenes(chr, cisStart, cisEnd, peakLoc, chr_genes)
+		for(id in attr(chr_genes, 'geneIdentifiers')) {
 
-		ann[paste('associated_', id, sep='')] <- paste(a, collapse='|')
-		ann[paste('other_', id, sep='')] <- paste(o, collapse='|')
+			a <- chr_genes[ags$associated, id]
+			a <- a[a!='']
+
+			o <- chr_genes[ags$other, id]
+			o <- o[o!='']
+
+			ann[paste('associated_', id, sep='')] <- paste(a, collapse='|')
+			ann[paste('other_', id, sep='')] <- paste(o, collapse='|')
+		}
 	}
-	
+
 	return(ann)
 }
 
@@ -714,7 +740,7 @@ getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromos
 	margin <- 100e3
 	# the genes within the region + margin
 	gene.idx <- which(chr_genes$start_position < (cisEnd + margin) & chr_genes$end_position > (cisStart - margin))
-	
+
 	if (length(gene.idx) == 0) {
 		list(
 			associated = numeric(0),
@@ -728,7 +754,7 @@ getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromos
 	} else {
 		# 2. calculate the distances
 		dists <- pmin(abs(chr_genes$start_position[gene.idx] - peakLoc), abs(chr_genes$end_position[gene.idx] - peakLoc))
-		
+
 		# genes which contain the peak get distance 0
 		dists[chr_genes$start_position[gene.idx] <= peakLoc & chr_genes$end_position[gene.idx] >= peakLoc] <- 0
 
@@ -739,10 +765,10 @@ getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromos
 #		dists[curated.idx] <- dists[curated.idx] - 20 * max.dist
 #		dists[automatic.idx] <- dists[automatic.idx] - 10 * max.dist
 
-		gene.order <- order(dists, decreasing=FALSE)	
-		
+		gene.order <- order(dists, decreasing=FALSE)
+
 		min.ties <- length(which(dists == min(dists)))
-		
+
 		list(
 			associated = gene.idx[gene.order][1:min.ties],
 			other      = gene.idx[gene.order][-(1:min.ties)]
@@ -753,7 +779,7 @@ getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromos
 #		)
 	}
 }
-		
+
 .formatScales <- function(scales) {
 	str <- as.character(scales)
 	k.idx <- scales %% 1e3 == 0
@@ -770,29 +796,28 @@ getCISs <- function(cimplAnalysis, alpha=0.05, chromosomes=cimplAnalysis@chromos
 getCISMatrix <- function(cimplAnalysis, ciss) {
 	df <- do.call('rbind', lapply(cimplAnalysis@chromosomes, function(chr) {
 		chr.idx <- which(cimplAnalysis@chromosomes == chr)
-		
-		
+
 		chr_data <- cimplAnalysis@cimplObjects[[chr.idx]][[1]]@data
-		
+
 		cisids <- do.call('cbind', lapply(cimplAnalysis@scales, function(kw) {
-							
+
 			kw.idx <- which(cimplAnalysis@scales == kw)
 			cimplObject <- cimplAnalysis@cimplObjects[[chr.idx]][[kw.idx]]
-			
+
 			# snap insertions to peaks (see http://bioinformatics.nki.nl/forum/viewtopic.php?f=4&t=19)
 			snappedLocs <- .snapToPeaks(chr_data$location, cimplObject@peaks$x)
-			
+
 			insertion2cis <- rep('', dim(chr_data)[1])
-			
+
 			ciss.idx <- which(ciss$chromosome == chr & ciss$scale == kw)
 			for (i in ciss.idx) {
 #				insertion2cis[snappedLocs >= ciss$start[i] & snappedLocs <= ciss$end[i]] <- rownames(ciss)[i]
 #				insertion2cis[snappedLocs == ciss$peak_location[i]] <- rownames(ciss)[i]
 				locs.idx <- snappedLocs >= ciss$start[i] & snappedLocs <= ciss$end[i]
-				
+
 				insertion2cis[locs.idx] <- paste(insertion2cis[locs.idx], rownames(ciss)[i], sep='|')
 			}
-			
+
 			substring(insertion2cis, 2)
 		}))
 		colnames(cisids) <- cimplAnalysis@scales
@@ -805,24 +830,24 @@ getInsertions <- function(cimplAnalysis, chr, scale, bpLim) {
 	scale.idx <- which(cimplAnalysis@scales == scale)
 	chr_data <- cimplAnalysis@cimplObjects[[chr.idx]][[scale.idx]]@data
 	#chr_data[chr_data$location >= bpLim[1] & chr_data$location <= bpLim[2], ]
-	
+
 	# snap insertions to peaks (see http://bioinformatics.nki.nl/forum/viewtopic.php?f=4&t=19)
 	snappedLocs <- .snapToPeaks(chr_data$location, cimplAnalysis@cimplObjects[[chr.idx]][[scale.idx]]@peaks$x)
 	chr_data[snappedLocs >= bpLim[1] & snappedLocs <= bpLim[2], ]
 }
 
-.nToString <- function(n, nDigits, prefix='', postfix='') { 
-	out <- NULL 
+.nToString <- function(n, nDigits, prefix='', postfix='') {
+	out <- NULL
 	sapply(n, function(n) {
-		while(n > 0) { 
-			out <- c(n%%10 , out) 
+		while(n > 0) {
+			out <- c(n%%10 , out)
 			n <- n%/%10
-		} 
-		
+		}
+
 		if (length(out) < nDigits) {
 			out <- c( rep(0, nDigits - length(out)) , out)
 		}
-		
+
 		paste(prefix, paste(out, collapse=''), postfix, sep='')
 	})
 }
